@@ -55,7 +55,12 @@ export default function SubmitPage() {
         saving={saving}
         result={result}
       />
-      <AnalysisPanel result={result} error={error} saved={saved} />
+      <AnalysisPanel
+        result={result}
+        error={error}
+        saved={saved}
+        analyzing={analyzing}  // add this
+      />
     </div>
   )
 }

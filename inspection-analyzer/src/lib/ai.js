@@ -19,16 +19,28 @@ Analyze the given inspection report and return ONLY valid JSON (no markdown, no 
 }`
 
 const PHOTO_PROMPT = `You are a violation detection assistant for Qatar Tourism Authority.
-Look carefully at this photo and identify any visible violations such as:
-- Blocked or obstructed fire exits
-- Missing or damaged fire safety equipment
-- Hygiene or food safety issues
-- Improper storage
-- Missing signage or safety notices
-- Any other safety or compliance hazard
-- Any other visible issue that may violate regulations
+Look carefully at this photo and identify any visible violations.
 
-Return a plain 1-2 sentence description of what you see. If no violations are visible, say no violations found.`
+Return ONLY valid JSON with this exact structure (no markdown, no code fences):
+{
+  "hasViolation": <true if ANY violation, hazard, or safety/hygiene issue is visible, false ONLY if the image is fully compliant>,
+  "violationClass": "<pick the best match from the list below>",
+  "summary": "<1-2 sentences describing what you see and what the violation is>"
+}
+
+Violation class options — pick the closest:
+- food_safety_violation (improper food storage, uncovered food, wrong temperatures)
+- improper_storage (items stored incorrectly or dangerously)
+- hygiene_violation (unclean surfaces, poor sanitation)
+- fire_exit_blocked (exits obstructed)
+- missing_fire_equipment (extinguishers missing or expired)
+- electrical_hazard (exposed wiring, unsafe electrical)
+- missing_signage (required signs absent)
+- missing_first_aid (first aid kit absent or empty)
+- safety_hazard (any other safety risk)
+- no_violation (use ONLY if the image is fully compliant with no issues at all)
+
+IMPORTANT: If you describe any issue, hazard, or concern in your summary, hasViolation MUST be true.`
 
 function parseJson(raw) {
   const clean = raw.replace(/```json|```/g, '').trim()
@@ -45,18 +57,14 @@ function getProvider() {
 }
 
 function assertProviderReady(provider) {
-  if (provider === 'openai' && !process.env.OPENAI_API_KEY) {
-    throw new Error('No AI key configured. Add OPENAI_API_KEY, GEMINI_API_KEY, or Azure OpenAI vars to .env')
-  }
-  if (provider === 'gemini' && !process.env.GEMINI_API_KEY) {
+  if (provider === 'openai' && !process.env.OPENAI_API_KEY)
+    throw new Error('No AI key configured. Add OPENAI_API_KEY to .env')
+  if (provider === 'gemini' && !process.env.GEMINI_API_KEY)
     throw new Error('GEMINI_API_KEY is not set')
-  }
-  if (provider === 'groq' && !process.env.GROQ_API_KEY) {
+  if (provider === 'groq' && !process.env.GROQ_API_KEY)
     throw new Error('GROQ_API_KEY is not set')
-  }
-  if (provider === 'azure' && (!process.env.AZURE_OPENAI_KEY || !process.env.AZURE_OPENAI_ENDPOINT)) {
+  if (provider === 'azure' && (!process.env.AZURE_OPENAI_KEY || !process.env.AZURE_OPENAI_ENDPOINT))
     throw new Error('AZURE_OPENAI_KEY and AZURE_OPENAI_ENDPOINT are required')
-  }
 }
 
 function getGroqClient() {
@@ -79,7 +87,6 @@ function getAzureClient() {
   const endpoint = (process.env.AZURE_OPENAI_ENDPOINT || '').replace(/\/$/, '')
   const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o'
   const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview'
-
   return new OpenAI({
     apiKey: process.env.AZURE_OPENAI_KEY,
     baseURL: `${endpoint}/openai/deployments/${deployment}`,
@@ -129,7 +136,10 @@ async function chatWithGemini(prompt, { json = false } = {}) {
 
 async function chatWithGeminiVision(base64Image, mimeType, textPrompt) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+  })
   const result = await model.generateContent([
     { inlineData: { data: base64Image, mimeType } },
     { text: textPrompt },
@@ -143,7 +153,6 @@ export async function analyzeReport(reportText) {
 
   try {
     let raw
-
     if (provider === 'azure') {
       raw = await chatWithAzure([
         { role: 'system', content: SYSTEM_PROMPT },
@@ -162,59 +171,66 @@ export async function analyzeReport(reportText) {
         { role: 'user', content: `Analyze this inspection report and return JSON only:\n\n${reportText}` },
       ], { json: true })
     }
-
     return parseJson(raw)
   } catch (err) {
     if (provider === 'azure' && err?.status === 403) {
-      throw new Error(
-        'Azure OpenAI blocked public access. Connect to org VPN, ask IT to enable public access, or add OPENAI_API_KEY / GEMINI_API_KEY and set AI_PROVIDER=openai or gemini.'
-      )
+      throw new Error('Azure OpenAI blocked public access. Connect to org VPN or switch to another provider.')
     }
     throw err
   }
 }
 
-export async function analyzePhotoWithAzure(base64Image, mimeType = 'image/jpeg') {
+export async function analyzePhotoWithAI(base64Image, mimeType = 'image/jpeg') {
   const provider = getProvider()
   assertProviderReady(provider)
 
-  let summary
+  try {
+    let raw
 
-  if (provider === 'gemini') {
-    summary = (await chatWithGeminiVision(base64Image, mimeType, PHOTO_PROMPT)).trim()
-  } else if (provider === 'groq') {
-    summary = (await chatWithGroq([{
-      role: 'user',
-      content: [
-        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-        { type: 'text', text: PHOTO_PROMPT },
-      ],
-    }], {
-      maxTokens: 300,
-      model: process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct'
-    })).trim()
-  } else if (provider === 'azure') {
-    summary = (await chatWithAzure([{
-      role: 'user',
-      content: [
-        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' } },
-        { type: 'text', text: PHOTO_PROMPT },
-      ],
-    }], { maxTokens: 300 })).trim()
-  } else {
-    summary = (await chatWithOpenAI([{
-      role: 'user',
-      content: [
-        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' } },
-        { type: 'text', text: PHOTO_PROMPT },
-      ],
-    }], { maxTokens: 300 })).trim()
-  }
+    if (provider === 'gemini') {
+      raw = await chatWithGeminiVision(base64Image, mimeType, PHOTO_PROMPT)
+    } else if (provider === 'groq') {
+      raw = await chatWithGroq([{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          { type: 'text', text: PHOTO_PROMPT },
+        ],
+      }], {
+        maxTokens: 300,
+        model: process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct',
+        json: true,
+      })
+    } else if (provider === 'azure') {
+      raw = await chatWithAzure([{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' } },
+          { type: 'text', text: PHOTO_PROMPT },
+        ],
+      }], { maxTokens: 300, json: true })
+    } else {
+      raw = await chatWithOpenAI([{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' } },
+          { type: 'text', text: PHOTO_PROMPT },
+        ],
+      }], { maxTokens: 300, json: true })
+    }
 
-  const noViolation = summary.toLowerCase().includes('no violations found')
-  return {
-    detections: noViolation ? [] : [{ class: 'violation_detected_by_ai', confidence: 1 }],
-    summary,
-    source: provider,
+    const parsed = parseJson(raw)
+    return {
+      hasViolation: parsed.hasViolation ?? false,
+      violationClass: parsed.violationClass || 'no_violation',
+      summary: parsed.summary || 'No description returned.',
+    }
+  } catch (err) {
+    console.error('Photo analysis error:', err)
+    return {
+      hasViolation: false,
+      violationClass: 'no_violation',
+      summary: 'Photo analysis failed. Please review manually.',
+    }
   }
 }

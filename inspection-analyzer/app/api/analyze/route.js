@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { extractTextFromDocument } from '@/lib/document'
-import { analyzeReport } from '@/lib/ai'
-import { analyzePhoto, mergePhotoChecks } from '@/lib/roboflow'
+import { analyzeReport, analyzePhotoWithAI } from '@/lib/ai'
 import { saveUploadedFile } from '@/lib/storage'
 
 export const maxDuration = 60
@@ -44,20 +43,31 @@ export async function POST(request) {
       if (!ALLOWED_PHOTO_TYPES.includes(entry.type)) continue
 
       const saved = await saveUploadedFile(entry, 'photos')
-      const cv = await analyzePhoto(saved.relativePath, extractedText) // passes report text for fallback routing
+      const buffer = Buffer.from(await entry.arrayBuffer())
+      const base64 = buffer.toString('base64')
+      const cv = await analyzePhotoWithAI(base64, entry.type)
 
-      console.log(`Photo: ${saved.fileName} → detections: ${cv.detections.length} | source: ${cv.source} | summary: ${cv.summary}`)
+      console.log(`Photo: ${saved.fileName} → class: ${cv.violationClass} | summary: ${cv.summary}`)
 
       photos.push({
         fileName: saved.fileName,
         filePath: saved.relativePath,
-        detections: cv.detections,
+        violationClass: cv.violationClass,
         summary: cv.summary,
-        source: cv.source,
+        hasViolation: cv.hasViolation,
       })
     }
 
-    const checks = mergePhotoChecks(analysis.checks, photos)
+    // add photo check to checklist
+    const checks = [...analysis.checks]
+    if (photos.length > 0) {
+      const anyViolation = photos.some(p => p.hasViolation)
+      checks.push({
+        label: 'Violation detected in photo evidence',
+        pass: anyViolation,
+        hint: anyViolation ? '' : 'Photos were uploaded but no violation was detected. Review manually.',
+      })
+    }
 
     return NextResponse.json({
       ...analysis,
