@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { extractTextFromDocument } from '@/lib/document'
 import { analyzeReport, analyzePhotoWithAI } from '@/lib/ai'
-import { saveUploadedFile } from '@/lib/storage'
+import { saveBuffer, saveUploadedFile } from '@/lib/storage'
 
 export const maxDuration = 60
 
@@ -34,7 +34,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Could not extract enough text from the document' }, { status: 400 })
     }
 
-    const savedDoc = await saveUploadedFile(document, 'documents')
+    const savedDoc = await saveBuffer(docBuffer, document.name, 'documents')
     const analysis = await analyzeReport(extractedText)
 
     const photos = []
