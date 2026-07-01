@@ -104,9 +104,6 @@ function PhotoAnalysis({ photos }) {
 
   return (
     <div className="photo-analysis" style={{ marginTop: 20 }}>
-      <div className="checklist-heading" style={{ marginBottom: 10 }}>
-        <Camera size={12} /> Photo Analysis
-      </div>
 
       {/* Per-photo summary
       {photos.map((photo, i) => (
