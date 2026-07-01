@@ -105,17 +105,6 @@ function PhotoAnalysis({ photos }) {
   return (
     <div className="photo-analysis" style={{ marginTop: 20 }}>
 
-      {/* Per-photo summary
-      {photos.map((photo, i) => (
-        <div key={i} style={{
-          padding: '10px 12px', borderRadius: 9, marginBottom: 6,
-          border: '1px solid var(--border2)', background: 'var(--surface)',
-        }}>
-          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>{photo.fileName}</div>
-          <div style={{ fontSize: 12, color: 'var(--text2)' }}>{photo.summary}</div>
-        </div>
-      ))} */}
-
       {/* Violations detected section */}
       <div style={{ marginTop: 14 }}>
         <div className="checklist-heading" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
